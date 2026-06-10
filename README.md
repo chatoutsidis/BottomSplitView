@@ -7,7 +7,7 @@ The package is useful for editor-style interfaces, consoles, inspectors, logs, t
 ## Preview
 
 <!-- Example: ![BottomSplitView preview](Docs/preview.png) -->
-![BottomSplitView preview](./preview-1.png)
+![BottomSplitView preview](./preview.png)
 
 ## Requirements
 
