@@ -95,6 +95,60 @@ struct BottomSplitConfiguration: Equatable {
     let dividerHitExtension: CGFloat
 }
 
+struct BottomSplitDragOutcome: Equatable {
+    let isPanelPresented: Bool
+    let lastExpandedPanelHeight: CGFloat
+    let snappedBottomHeight: CGFloat?
+}
+
+struct BottomSplitLayoutCalculator {
+    let configuration: BottomSplitConfiguration
+    let containerHeight: CGFloat
+    let dividerThickness: CGFloat
+
+    func targetBottomHeight(isPresented: Bool, lastExpandedPanelHeight: CGFloat) -> CGFloat {
+        configuration.statusBarHeight + (isPresented ? clampedExpandedPanelHeight(lastExpandedPanelHeight) : 0)
+    }
+
+    func clampedBottomHeight(_ proposedHeight: CGFloat) -> CGFloat {
+        let maximumAllowed = maximumAllowedBottomHeight
+        return min(max(configuration.statusBarHeight, proposedHeight), maximumAllowed)
+    }
+
+    func clampedExpandedPanelHeight(_ proposedHeight: CGFloat) -> CGFloat {
+        let maximumAllowed = maximumAllowedPanelHeight
+        guard maximumAllowed > 0 else { return 0 }
+
+        let minimumAllowed = min(configuration.minPanelHeight, maximumAllowed)
+        return min(max(proposedHeight, minimumAllowed), min(configuration.maxPanelHeight, maximumAllowed))
+    }
+
+    func dragEnded(currentPanelHeight: CGFloat, lastExpandedPanelHeight: CGFloat) -> BottomSplitDragOutcome {
+        if currentPanelHeight < configuration.collapseSnapThreshold {
+            return BottomSplitDragOutcome(
+                isPanelPresented: false,
+                lastExpandedPanelHeight: lastExpandedPanelHeight,
+                snappedBottomHeight: configuration.statusBarHeight
+            )
+        }
+
+        let clampedHeight = clampedExpandedPanelHeight(currentPanelHeight)
+        return BottomSplitDragOutcome(
+            isPanelPresented: true,
+            lastExpandedPanelHeight: clampedHeight,
+            snappedBottomHeight: targetBottomHeight(isPresented: true, lastExpandedPanelHeight: clampedHeight)
+        )
+    }
+
+    private var maximumAllowedBottomHeight: CGFloat {
+        max(configuration.statusBarHeight, containerHeight - dividerThickness)
+    }
+
+    private var maximumAllowedPanelHeight: CGFloat {
+        max(0, maximumAllowedBottomHeight - configuration.statusBarHeight)
+    }
+}
+
 @available(macOS 14, *)
 final class BottomSplitContainerView: NSView, NSSplitViewDelegate {
     var onPanelPresentedChange: ((Bool) -> Void)?
@@ -245,6 +299,14 @@ final class BottomSplitContainerView: NSView, NSSplitViewDelegate {
         max(0, currentBottomHeight - configuration.statusBarHeight)
     }
 
+    private var layoutCalculator: BottomSplitLayoutCalculator {
+        BottomSplitLayoutCalculator(
+            configuration: configuration,
+            containerHeight: bounds.height,
+            dividerThickness: splitView.dividerThickness
+        )
+    }
+
     private func setup() {
         splitView.isVertical = false
         splitView.dividerStyle = .thin
@@ -260,21 +322,25 @@ final class BottomSplitContainerView: NSView, NSSplitViewDelegate {
     }
 
     private func handleDividerDragEnded() {
-        let measuredPanelHeight = currentPanelHeight
+        let outcome = layoutCalculator.dragEnded(
+            currentPanelHeight: currentPanelHeight,
+            lastExpandedPanelHeight: lastExpandedPanelHeight
+        )
 
-        if measuredPanelHeight < configuration.collapseSnapThreshold {
-            currentPanelPresented = false
-            setBottomHeight(configuration.statusBarHeight, animated: true) { [weak self] in
+        currentPanelPresented = outcome.isPanelPresented
+
+        guard let snappedBottomHeight = outcome.snappedBottomHeight else { return }
+
+        if outcome.isPanelPresented == false {
+            setBottomHeight(snappedBottomHeight, animated: true) { [weak self] in
                 self?.onPanelPresentedChange?(false)
             }
             return
         }
 
-        currentPanelPresented = true
-        lastExpandedPanelHeight = clampedExpandedPanelHeight(measuredPanelHeight)
+        lastExpandedPanelHeight = outcome.lastExpandedPanelHeight
         onPanelPresentedChange?(true)
 
-        let snappedBottomHeight = configuration.statusBarHeight + lastExpandedPanelHeight
         if abs(currentBottomHeight - snappedBottomHeight) > 0.5 {
             setBottomHeight(snappedBottomHeight, animated: true)
         }
@@ -291,24 +357,22 @@ final class BottomSplitContainerView: NSView, NSSplitViewDelegate {
     }
 
     private func targetBottomHeight(for isPresented: Bool) -> CGFloat {
-        configuration.statusBarHeight + (isPresented ? clampedExpandedPanelHeight(lastExpandedPanelHeight) : 0)
+        layoutCalculator.targetBottomHeight(
+            isPresented: isPresented,
+            lastExpandedPanelHeight: lastExpandedPanelHeight
+        )
     }
 
     private func clampedBottomHeight(_ proposedHeight: CGFloat) -> CGFloat {
-        let maximumAllowed = maximumAllowedBottomHeight
-        return min(max(configuration.statusBarHeight, proposedHeight), maximumAllowed)
+        layoutCalculator.clampedBottomHeight(proposedHeight)
     }
 
     private func clampedExpandedPanelHeight(_ proposedHeight: CGFloat) -> CGFloat {
-        let maximumAllowed = maximumAllowedPanelHeight
-        guard maximumAllowed > 0 else { return 0 }
-
-        let minimumAllowed = min(configuration.minPanelHeight, maximumAllowed)
-        return min(max(proposedHeight, minimumAllowed), min(configuration.maxPanelHeight, maximumAllowed))
+        layoutCalculator.clampedExpandedPanelHeight(proposedHeight)
     }
 
     private var maximumAllowedBottomHeight: CGFloat {
-        max(configuration.statusBarHeight, bounds.height - splitView.dividerThickness)
+        layoutCalculator.clampedBottomHeight(.greatestFiniteMagnitude)
     }
 
     private var maximumAllowedPanelHeight: CGFloat {
