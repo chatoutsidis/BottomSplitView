@@ -30,7 +30,7 @@ Or add it to another Swift package:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/your-user/BottomSplitView.git", from: "0.1.0")
+    .package(url: "https://github.com/chatoutsidis/BottomSplitView.git", from: "0.1.0")
 ]
 ```
 
